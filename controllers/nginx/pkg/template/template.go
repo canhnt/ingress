@@ -269,6 +269,8 @@ func buildProxyPass(host string, b interface{}, loc interface{}) string {
 	path := location.Path
 	proto := "http"
 
+	//glog.Infof("Building proxyPass for %s", host)
+
 	upstreamName := location.Backend
 	for _, backend := range backends {
 		if backend.Name == location.Backend {
@@ -276,6 +278,7 @@ func buildProxyPass(host string, b interface{}, loc interface{}) string {
 				proto = "https"
 			}
 
+			//glog.Info("Checking if ", location, " is in Locations:", backend.SessionAffinity.CookieSessionAffinity.Locations)
 			if isSticky(host, location, backend.SessionAffinity.CookieSessionAffinity.Locations) {
 				upstreamName = fmt.Sprintf("sticky-%v", upstreamName)
 			}
@@ -283,6 +286,7 @@ func buildProxyPass(host string, b interface{}, loc interface{}) string {
 			break
 		}
 	}
+	//glog.Infof("Upstream is %s", upstreamName)
 
 	// defProxyPass returns the default proxy_pass, just the name of the upstream
 	defProxyPass := fmt.Sprintf("proxy_pass %s://%s;", proto, upstreamName)
@@ -311,14 +315,14 @@ func buildProxyPass(host string, b interface{}, loc interface{}) string {
 			return fmt.Sprintf(`
 	rewrite %s(.*) /$1 break;
 	rewrite %s / break;
-	proxy_pass %s://%s;
-	%v`, path, location.Path, proto, location.Backend, abu)
+	%s
+	%v`, path, location.Path, defProxyPass, abu)
 		}
 
 		return fmt.Sprintf(`
 	rewrite %s(.*) %s/$1 break;
-	proxy_pass %s://%s;
-	%v`, path, location.Redirect.Target, proto, location.Backend, abu)
+	%s
+	%v`, path, location.Redirect.Target, defProxyPass, abu)
 	}
 
 	// default proxy_pass

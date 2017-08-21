@@ -3,10 +3,16 @@ all: push
 BUILDTAGS=
 
 # Use the 0.0 tag for testing, it shouldn't clobber any release builds
-TAG?=0.9.0-beta.11
-REGISTRY?=gcr.io/google_containers
+TAG?=0.9.0-beta.11-brc-$(shell date +%Y.%m.%d)
+REGISTRY?=quay.io/hippo
 GOOS?=linux
-DOCKER?=gcloud docker --
+DOCKER?=docker
+SED_I?=sed -i
+GOHOSTOS ?= $(shell go env GOHOSTOS)
+
+ifeq ($(GOHOSTOS),darwin)
+  SED_I=sed -i ''
+endif
 
 REPO_INFO=$(shell git config --get remote.origin.url)
 
@@ -50,6 +56,8 @@ endif
 
 TEMP_DIR := $(shell mktemp -d)
 
+DOCKERFILE := $(TEMP_DIR)/rootfs/Dockerfile
+
 all: all-container
 
 sub-container-%:
@@ -65,19 +73,19 @@ all-push: $(addprefix sub-push-,$(ALL_ARCH))
 container: .container-$(ARCH)
 .container-$(ARCH):
 	cp -r ./* $(TEMP_DIR)
-	cd $(TEMP_DIR) && sed -i 's|BASEIMAGE|$(BASEIMAGE)|g' rootfs/Dockerfile
-	cd $(TEMP_DIR) && sed -i "s|QEMUARCH|$(QEMUARCH)|g" rootfs/Dockerfile
-	cd $(TEMP_DIR) && sed -i "s|DUMB_ARCH|$(DUMB_ARCH)|g" rootfs/Dockerfile
+	$(SED_I) 's|BASEIMAGE|$(BASEIMAGE)|g' $(DOCKERFILE)
+	$(SED_I) "s|QEMUARCH|$(QEMUARCH)|g" $(DOCKERFILE)
+	$(SED_I) "s|DUMB_ARCH|$(DUMB_ARCH)|g" $(DOCKERFILE)
 
 ifeq ($(ARCH),amd64)
 	# When building "normally" for amd64, remove the whole line, it has no part in the amd64 image
-	cd $(TEMP_DIR) && sed -i "/CROSS_BUILD_/d" rootfs/Dockerfile
+	$(SED_I) "/CROSS_BUILD_/d" $(DOCKERFILE)
 else
 	# When cross-building, only the placeholder "CROSS_BUILD_" should be removed
 	# Register /usr/bin/qemu-ARCH-static as the handler for ARM binaries in the kernel
 	$(DOCKER) run --rm --privileged multiarch/qemu-user-static:register --reset
 	curl -sSL https://github.com/multiarch/qemu-user-static/releases/download/$(QEMUVERSION)/x86_64_qemu-$(QEMUARCH)-static.tar.gz | tar -xz -C $(TEMP_DIR)/rootfs
-	cd $(TEMP_DIR) && sed -i "s/CROSS_BUILD_//g" rootfs/Dockerfile
+	$(SED_I) "s/CROSS_BUILD_//g" $(DOCKERFILE)
 endif
 
 	$(DOCKER) build -t $(MULTI_ARCH_IMG):$(TAG) $(TEMP_DIR)/rootfs
@@ -98,6 +106,7 @@ clean:
 	$(DOCKER) rmi -f $(MULTI_ARCH_IMG):$(TAG) || true
 
 build: clean
+	@echo "Tempdir: $(TEMP_DIR)"
 	CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build -a -installsuffix cgo \
 		-ldflags "-s -w -X ${PKG}/pkg/version.RELEASE=${TAG} -X ${PKG}/pkg/version.COMMIT=${COMMIT} -X ${PKG}/pkg/version.REPO=${REPO_INFO}" \
 		-o ${TEMP_DIR}/rootfs/nginx-ingress-controller ${PKG}/pkg/cmd/controller
